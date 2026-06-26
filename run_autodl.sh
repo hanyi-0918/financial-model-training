@@ -10,7 +10,7 @@ set -e
 
 # ---------- 可调参数 ----------
 WORKDIR="/root/autodl-tmp"                 # AutoDL 数据盘（持久、大）
-REPO="https://github.com/jingyaogong/minimind.git"
+REPO="https://github.com/hanyi-0918/financial-model-training.git"
 PROJ="$WORKDIR/minimind"
 DATA="$PROJ/dataset/pretrain_t2t_mini.jsonl"
 
