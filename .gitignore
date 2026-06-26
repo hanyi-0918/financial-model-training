@@ -4,3 +4,12 @@ __pycache__/
 out
 website/
 docs-minimind/
+
+# 数据集（大文件，不入库）
+*.jsonl
+dataset/.msc
+dataset/.cache/
+
+# 模型权重 & 检查点
+*.pth
+checkpoints/
