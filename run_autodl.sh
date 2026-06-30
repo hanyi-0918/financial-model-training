@@ -2,14 +2,18 @@
 # ============================================================
 # MiniMind 训练 - AutoDL 一键引导脚本（支持多阶段）
 # 用法：
-#   bash run_autodl.sh pretrain    # 预训练（默认）
-#   bash run_autodl.sh sft         # 指令微调（基于 pretrain 权重）
+#   bash run_autodl.sh pretrain        # 预训练（默认）
+#   bash run_autodl.sh sft             # 指令微调（基于 pretrain 权重）
+#   bash run_autodl.sh sft wandb       # 同时开启 swanlab 网页实时曲线
 # 作用：克隆/更新代码 -> 装依赖 -> 下对应数据 -> 后台启动训练（实时日志）
 # 可重复执行：已存在的代码/数据会跳过
+# 注：开 wandb 需先在本机执行过 `swanlab login` 并粘贴 swanlab.cn 的 API Key
 # ============================================================
 set -e
 
 STAGE="${1:-pretrain}"   # 第一个参数指定阶段，默认 pretrain
+WANDB_FLAG=""            # 第二个参数为 wandb 时开启 swanlab 上报
+[ "${2:-}" = "wandb" ] && WANDB_FLAG="--use_wandb"
 
 # ---------- 可调参数 ----------
 WORKDIR="/root/autodl-tmp"
@@ -82,6 +86,7 @@ nohup python -u "$TRAIN_PY" \
   --epochs $EPOCHS \
   --save_interval 1000 \
   --log_interval 100 \
+  $WANDB_FLAG \
   > ../out/$LOG 2>&1 &
 
 echo ""
