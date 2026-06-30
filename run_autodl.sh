@@ -26,14 +26,20 @@ EPOCHS=1
 NUM_WORKERS=8
 # ------------------------------
 
-# 按阶段映射：数据文件 / 训练脚本 / 日志名
+# 按阶段映射：数据文件 / 训练脚本 / 日志名 / 所需起点权重 / 该阶段 batch
+STAGE_BATCH=$BATCH_SIZE   # 默认沿用上面的 batch
+REQUIRED_WEIGHT=""        # 该阶段需要哪个权重作为起点（空=从头）
 case "$STAGE" in
   pretrain)
     DATA_FILE="pretrain_t2t_mini.jsonl"; TRAIN_PY="train_pretrain.py"; LOG="pretrain.log" ;;
   sft)
-    DATA_FILE="sft_t2t_mini.jsonl";      TRAIN_PY="train_full_sft.py"; LOG="full_sft.log" ;;
+    DATA_FILE="sft_t2t_mini.jsonl";      TRAIN_PY="train_full_sft.py"; LOG="full_sft.log"
+    REQUIRED_WEIGHT="pretrain_768.pth" ;;
+  dpo)
+    DATA_FILE="dpo.jsonl";               TRAIN_PY="train_dpo.py";      LOG="dpo.log"
+    REQUIRED_WEIGHT="full_sft_768.pth";  STAGE_BATCH=16 ;;  # DPO 加载 actor+ref 两个模型，batch 调小防 OOM
   *)
-    echo "未知阶段：$STAGE（可选 pretrain / sft）"; exit 1 ;;
+    echo "未知阶段：$STAGE（可选 pretrain / sft / dpo）"; exit 1 ;;
 esac
 DATA="$PROJ/dataset/$DATA_FILE"
 
@@ -62,10 +68,10 @@ else
   modelscope download --dataset gongjy/minimind_dataset "$DATA_FILE" --local_dir ./dataset
 fi
 
-# SFT 需要预训练权重作为起点
-if [ "$STAGE" = "sft" ] && [ ! -f "$PROJ/out/pretrain_768.pth" ]; then
-  echo "！！ SFT 需要 out/pretrain_768.pth 作为起点，但未找到。"
-  echo "    请先跑预训练，或把本地 pretrain_768.pth 上传到 $PROJ/out/"
+# 检查该阶段所需的起点权重（sft 需要 pretrain，dpo 需要 full_sft）
+if [ -n "$REQUIRED_WEIGHT" ] && [ ! -f "$PROJ/out/$REQUIRED_WEIGHT" ]; then
+  echo "！！ 阶段 [$STAGE] 需要 out/$REQUIRED_WEIGHT 作为起点，但未找到。"
+  echo "    请先完成上一阶段，或把本地 $REQUIRED_WEIGHT 上传到 $PROJ/out/"
   exit 1
 fi
 
@@ -79,7 +85,7 @@ cd trainer
 nohup python -u "$TRAIN_PY" \
   --device cuda:0 \
   --dtype bfloat16 \
-  --batch_size $BATCH_SIZE \
+  --batch_size $STAGE_BATCH \
   --max_seq_len $MAX_SEQ_LEN \
   --num_workers $NUM_WORKERS \
   --accumulation_steps $ACCUM_STEPS \
