@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # ============================================================
-# MiniMind 预训练 - AutoDL 一键引导脚本
-# 用法：上传本文件到 AutoDL 服务器后执行
-#   bash run_autodl.sh
-# 作用：克隆代码 -> 下载数据 -> 装依赖 -> 后台启动预训练
-# 可重复执行：已存在的代码/数据会跳过，不会重复下载
+# MiniMind 训练 - AutoDL 一键引导脚本（支持多阶段）
+# 用法：
+#   bash run_autodl.sh pretrain    # 预训练（默认）
+#   bash run_autodl.sh sft         # 指令微调（基于 pretrain 权重）
+# 作用：克隆/更新代码 -> 装依赖 -> 下对应数据 -> 后台启动训练（实时日志）
+# 可重复执行：已存在的代码/数据会跳过
 # ============================================================
 set -e
 
+STAGE="${1:-pretrain}"   # 第一个参数指定阶段，默认 pretrain
+
 # ---------- 可调参数 ----------
-WORKDIR="/root/autodl-tmp"                 # AutoDL 数据盘（持久、大）
+WORKDIR="/root/autodl-tmp"
 REPO="https://github.com/hanyi-0918/financial-model-training.git"
 PROJ="$WORKDIR/minimind"
-DATA="$PROJ/dataset/pretrain_t2t_mini.jsonl"
-
-# 训练超参（按显存调整）
 BATCH_SIZE=64
 MAX_SEQ_LEN=768
 ACCUM_STEPS=8
@@ -22,13 +22,25 @@ EPOCHS=1
 NUM_WORKERS=8
 # ------------------------------
 
-echo ">>> [0/5] 开启 AutoDL 学术加速（GitHub/HF 提速，仅 AutoDL 有效）"
+# 按阶段映射：数据文件 / 训练脚本 / 日志名
+case "$STAGE" in
+  pretrain)
+    DATA_FILE="pretrain_t2t_mini.jsonl"; TRAIN_PY="train_pretrain.py"; LOG="pretrain.log" ;;
+  sft)
+    DATA_FILE="sft_t2t_mini.jsonl";      TRAIN_PY="train_full_sft.py"; LOG="full_sft.log" ;;
+  *)
+    echo "未知阶段：$STAGE（可选 pretrain / sft）"; exit 1 ;;
+esac
+DATA="$PROJ/dataset/$DATA_FILE"
+
+echo ">>> 阶段：$STAGE | 数据：$DATA_FILE | 脚本：$TRAIN_PY"
+
+echo ">>> [0/5] 开启 AutoDL 学术加速"
 source /etc/network_turbo 2>/dev/null || echo "    (非 AutoDL 环境，跳过)"
 
 echo ">>> [1/5] 准备代码"
 mkdir -p "$WORKDIR"
 if [ -d "$PROJ/.git" ]; then
-  echo "    已存在仓库，git pull 更新"
   git -C "$PROJ" pull --ff-only || true
 else
   git clone "$REPO" "$PROJ"
@@ -43,17 +55,24 @@ echo ">>> [3/5] 准备数据"
 if [ -f "$DATA" ]; then
   echo "    数据已存在，跳过下载：$DATA"
 else
-  modelscope download --dataset gongjy/minimind_dataset \
-    pretrain_t2t_mini.jsonl --local_dir ./dataset
+  modelscope download --dataset gongjy/minimind_dataset "$DATA_FILE" --local_dir ./dataset
+fi
+
+# SFT 需要预训练权重作为起点
+if [ "$STAGE" = "sft" ] && [ ! -f "$PROJ/out/pretrain_768.pth" ]; then
+  echo "！！ SFT 需要 out/pretrain_768.pth 作为起点，但未找到。"
+  echo "    请先跑预训练，或把本地 pretrain_768.pth 上传到 $PROJ/out/"
+  exit 1
 fi
 
 echo ">>> [4/5] 检查 GPU"
 python -c "import torch; print('    CUDA:', torch.cuda.is_available(), '| 设备:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')"
 
-echo ">>> [5/5] 后台启动预训练（日志写入 out/pretrain.log）"
+echo ">>> [5/5] 后台启动训练（日志写入 out/$LOG）"
 mkdir -p out
 cd trainer
-nohup python train_pretrain.py \
+# 注意 python -u：关闭输出缓冲，loss 实时写入日志（踩过的坑）
+nohup python -u "$TRAIN_PY" \
   --device cuda:0 \
   --dtype bfloat16 \
   --batch_size $BATCH_SIZE \
@@ -63,13 +82,12 @@ nohup python train_pretrain.py \
   --epochs $EPOCHS \
   --save_interval 1000 \
   --log_interval 100 \
-  > ../out/pretrain.log 2>&1 &
+  > ../out/$LOG 2>&1 &
 
 echo ""
 echo "============================================================"
-echo "训练已在后台启动！PID=$!"
-echo "实时看 loss：  tail -f $PROJ/out/pretrain.log"
-echo "查看进程：    ps aux | grep train_pretrain"
-echo "权重保存于：  $PROJ/out/pretrain_768.pth"
+echo "阶段 [$STAGE] 训练已在后台启动！PID=$!"
+echo "实时看 loss：  tail -f $PROJ/out/$LOG"
+echo "查看进程：    ps aux | grep $TRAIN_PY"
 echo "⚠️  训练完记得去 AutoDL 控制台【关机】，否则持续计费！"
 echo "============================================================"
