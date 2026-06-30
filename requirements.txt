@@ -8,7 +8,7 @@ marshmallow==3.22.0
 # matplotlib==3.10.0
 ngrok==1.4.0
 nltk==3.8
-numpy==1.26.4
+numpy>=2.0  # 原为 1.26.4，但与 AutoDL 镜像(numpy2.x 编译的 scipy/transformers)冲突，会导致 numpy 递归崩溃
 openai==1.59.6
 # peft==0.7.1
 psutil==5.9.8
